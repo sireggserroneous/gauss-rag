@@ -49,7 +49,11 @@ def text_to_markdown(text, title):
             out.append("")
             continue
         m = HEAD_NUM.match(s)
-        if m and len(s) < 160:
+        title = m.group(2).strip() if m else ""
+        # a real heading has a word after the number; "18   18" (page no.), "2 • Author" (author
+        # line) and "3 4.5" (table row) are not headings — academic PDFs are full of these
+        if m and len(s) < 160 and len(title) >= 3 and title[0].isalpha() and "•" not in s \
+                and sum(ch.isalpha() for ch in title) >= len(title) // 2:
             num = m.group(1)
             depth = num.count(".") + 2 if num[0].isdigit() else 2
             out.append(("#" * min(depth, 4)) + " " + s)
@@ -154,6 +158,8 @@ def demo():
     packed = chunk_markdown(md, "t.md", "doc", min_chars=500)
     assert len(packed) == 1, packed          # two runts pack into one
     assert text_to_markdown("1 Intro\nbody\n1.2 Sub\nmore", "X").count("\n#") == 2
+    junk = text_to_markdown("18   18\n2 • Jake Van Clief\n3 4.5 0.7\n4 MODEL", "X")
+    assert junk.count("\n#") == 1 and "# 4 MODEL" in junk, junk   # only the real heading survives
     print("ok  ingest demo")
 
 
