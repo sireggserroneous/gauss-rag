@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "gauss-rag",
+  "description": "Gauss RAG — documents as knots. Knot-native retrieval you can search and see.",
+  "owner": {
+    "name": "Pedro Paulino (Sir Eggs Erroneous)",
+    "url": "https://github.com/sireggserroneous"
+  },
+  "plugins": [
+    {
+      "name": "gauss-rag",
+      "description": "Drop docs into Gauss/, get knot-native RAG: construct plans, cross-document linking, knot/tangle/doc/simple views, analysis lenses, code-Gauss. BM25 by default, zero API calls.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

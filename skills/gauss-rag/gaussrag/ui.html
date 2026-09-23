@@ -1,0 +1,91 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Gauss RAG</title>
+<style>
+:root{--bg:#0f1115;--fg:#e6e6e6;--mute:#8b93a7;--pan:#171a21;--line:#2a2f3a;--acc:#6ee7b7;--sec:#60a5fa;--term:#f59e0b;--doc:#c084fc;--dang:#f87171;--hi:#fbbf24}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui,sans-serif;display:grid;grid-template-rows:auto 1fr;height:100vh}
+header{display:flex;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+header b{color:var(--acc)}.seg button{background:var(--pan);color:var(--fg);border:1px solid var(--line);padding:5px 10px;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--acc);color:#000;font-weight:600}select,input{background:var(--pan);color:var(--fg);border:1px solid var(--line);padding:5px 8px}
+input{min-width:260px}main{display:grid;grid-template-columns:1fr 380px;min-height:0}
+#stage{overflow:hidden;position:relative}#stage svg{width:100%;height:100%;display:block}
+#panel{border-left:1px solid var(--line);overflow:auto;padding:10px;background:var(--pan)}
+#panel h3{margin:6px 0;color:var(--acc);font-size:13px}.step{border-left:3px solid var(--line);padding:4px 8px;margin:6px 0;cursor:pointer}
+.step small{color:var(--mute)}.step.seed{border-color:var(--acc)}.step.x{border-color:var(--sec)}.step.ring{border-color:var(--mute)}.step.link{border-color:var(--doc)}
+pre{white-space:pre-wrap;font:12px/1.45 ui-monospace,monospace;color:#d7dbe6}.hit{cursor:pointer;padding:6px;border-bottom:1px solid var(--line)}.hit:hover{background:#1f2430}
+.legend{position:absolute;left:10px;bottom:10px;color:var(--mute);font-size:12px}.legend i{display:inline-block;width:10px;height:10px;margin:0 4px -1px 8px}
+.doclist .step{border-color:var(--line)}text{fill:var(--fg);font-size:11px;pointer-events:none}.arc{cursor:pointer}
+</style></head><body>
+<header><b>Gauss RAG</b>
+ <span class="seg" id="tabs"></span>
+ <select id="docsel"></select>
+ <input id="q" placeholder="search… (Enter) — results + construct plan"><label style="color:var(--mute)"><input type="checkbox" id="an"> analysis</label><span id="stat" style="color:var(--mute)"></span>
+</header>
+<main><div id="stage"><svg id="svg" viewBox="0 0 1000 700"></svg>
+ <div class="legend"><i style="background:var(--sec)"></i>section ref <i style="background:var(--term)"></i>defined term <i style="background:var(--doc)"></i>cross-document <i style="background:var(--dang)"></i>dangling <i style="background:var(--hi)"></i>construct path</div></div>
+ <aside id="panel"><h3>Gauss RAG</h3><div style="color:var(--mute)">Pick a view. Click an arc for its section. Search to see the assembly plan (the reading order) light up the knot.</div></aside></main>
+<script>
+// ── data ─────────────────────────────────────────────────────────────────────
+let K=null, view='knot', doc=null, hi=new Set(), docOf=[], AN=null;
+const anCls=i=>!AN?'':AN.hub.has(i)?'hub':AN.fan.has(i)?'fan':AN.cyc.has(i)?'cyc':'';
+const KC={section:'var(--sec)',term:'var(--term)',doc:'var(--doc)'};
+const svg=document.getElementById('svg'), panel=document.getElementById('panel');
+async function loadK(){K=await (await fetch('/knot.json')).json(); docOf=[]; for(const [d,arcs] of Object.entries(K.docs)) for(const i of arcs) docOf[i]=d;
+ const sel=document.getElementById('docsel'); sel.innerHTML=Object.keys(K.docs).map(d=>`<option>${d}</option>`).join(''); doc=doc||Object.keys(K.docs)[0]; sel.value=doc;
+ document.getElementById('stat').textContent=`${K.labels.length} sections · ${Object.keys(K.docs).length} docs · ${K.crossings.length} crossings · ${K.dangling.length} dangling`; render();}
+document.getElementById('docsel').onchange=e=>{doc=e.target.value;render()};
+// ── view registry: add a renderer here + a tab appears. fn(svg, K, state) draws into the svg. ──
+const VIEWS={simple:drawSimple, doc:drawDoc, knot:drawKnot, tangle:drawTangle};
+const tabs=document.getElementById('tabs'); for(const v of Object.keys(VIEWS)){const b=document.createElement('button');b.textContent=v;b.onclick=()=>{view=v;render()};tabs.appendChild(b);}
+function render(){for(const b of tabs.children)b.setAttribute('aria-pressed',b.textContent===view); svg.innerHTML=''; VIEWS[view](svg,K,{doc,hi});}
+const leaf=l=>l.split(' › ').pop(); const P=(cx,cy,r,a)=>[cx+r*Math.cos(a),cy+r*Math.sin(a)];
+function el(n,a,txt){const e=document.createElementNS('http://www.w3.org/2000/svg',n);for(const k in a)e.setAttribute(k,a[k]);if(txt!=null)e.textContent=txt;return e;}
+async function showDoc(i){const d=await (await fetch('/doc?idx='+i)).json(); panel.innerHTML=`<h3>${d.label}</h3><small style="color:var(--mute)">${d.doc} · arc ${d.pos}</small><pre>${esc(d.text)}</pre>`;}
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// ── one document as a ring: arcs on the circle, crossings as chords, dangling as stubs ──
+function ring(svgEl,arcs,cx,cy,r,opts={}){const n=arcs.length,pos={};arcs.forEach((i,k)=>{pos[i]=-Math.PI/2+2*Math.PI*k/n});
+ // chords first (under the arcs)
+ for(const x of K.crossings){const a=pos[x.over],b=pos[x.under]; if(a==null&&b==null)continue;
+  if(a!=null&&b!=null){const [x1,y1]=P(cx,cy,r,a),[x2,y2]=P(cx,cy,r,b),on=hi.has(x.over)&&hi.has(x.under);
+   const p=el('path',{d:`M${x1},${y1} Q${cx},${cy} ${x2},${y2}`,fill:'none',stroke:on?'var(--hi)':KC[x.kind]||'#888','stroke-width':on?2.5:1,opacity:on?1:.55}); p.appendChild(el('title',{},`${x.label} (${x.kind})`)); svgEl.appendChild(p);}
+  else if(opts.stubs!==false){const a2=a??b,[x1,y1]=P(cx,cy,r,a2),[x2,y2]=P(cx,cy,r+18,a2),o=a!=null?x.under:x.over;
+   const p=el('line',{x1,y1,x2,y2,stroke:'var(--doc)','stroke-width':1.5}); p.appendChild(el('title',{},`${x.label} → ${docOf[o]||'?'}`)); svgEl.appendChild(p);}}
+ for(const d of K.dangling){const a=pos[d.over]; if(a==null)continue; const [x1,y1]=P(cx,cy,r,a),[x2,y2]=P(cx,cy,r+14,a);
+  const p=el('line',{x1,y1,x2,y2,stroke:'var(--dang)','stroke-width':2,'stroke-dasharray':'3 2'}); p.appendChild(el('title',{},`dangling: ${d.label}`)); svgEl.appendChild(p);}
+ arcs.forEach(i=>{const a=pos[i],[x,y]=P(cx,cy,r,a),on=hi.has(i);
+  const ac=anCls(i),AC={hub:'var(--dang)',fan:'var(--term)',cyc:'var(--doc)'}[ac];const c=el('circle',{cx:x,cy:y,r:on?6:ac?5.5:Math.max(2.2,Math.min(5,180/n)),fill:on?'var(--hi)':(AC||'#cfd6e6'),stroke:ac==='cyc'?'var(--doc)':'none','stroke-width':2,class:'arc'}); c.appendChild(el('title',{},K.labels[i])); c.onclick=()=>showDoc(i); svgEl.appendChild(c);
+  if(n<=60||on){const [tx,ty]=P(cx,cy,r+26,a); svgEl.appendChild(el('text',{x:tx,y:ty,'text-anchor':Math.cos(a)<0?'end':'start','font-size':on?12:10},leaf(K.labels[i]).slice(0,28)));}});}
+function drawKnot(s,K,st){const arcs=K.docs[st.doc]||[]; s.appendChild(el('text',{x:500,y:26,'text-anchor':'middle','font-size':14},`${st.doc} · ${arcs.length} arcs · ${K.gauss[st.doc]?.slice(0,90)||''}`)); ring(s,arcs,500,370,280);}
+// ── every document interwoven: rings around a big circle, inter-doc crossings as curves between rings ──
+function drawTangle(s,K){const names=Object.keys(K.docs),m=names.length,R=250,center={};
+ names.forEach((d,k)=>{const a=-Math.PI/2+2*Math.PI*k/m,[cx,cy]=P(500,360,R,a);center[d]=[cx,cy];const rr=Math.max(38,Math.min(95,20+Math.sqrt(K.docs[d].length)*6));
+  ring(s,K.docs[d],cx,cy,rr,{stubs:false}); s.appendChild(el('text',{x:cx,y:cy+rr+30,'text-anchor':'middle','font-size':11},d.slice(0,26)));});
+ for(const x of K.crossings){const a=docOf[x.over],b=docOf[x.under]; if(!a||!b||a===b)continue; const [x1,y1]=center[a],[x2,y2]=center[b],on=hi.has(x.over)&&hi.has(x.under);
+  const p=el('path',{d:`M${x1},${y1} Q500,360 ${x2},${y2}`,fill:'none',stroke:on?'var(--hi)':'var(--doc)','stroke-width':on?2.5:1.2,opacity:on?1:.6}); p.appendChild(el('title',{},`${a} → ${b}: ${x.label}`)); s.appendChild(p);}}
+// ── the document, readable, in ring order with its crossings ──
+function drawDoc(s,K,st){const arcs=K.docs[st.doc]||[]; panel.innerHTML=`<h3>${st.doc}</h3><div class="doclist">`+arcs.map(i=>{const out=K.crossings.filter(x=>x.over===i).length,inn=K.crossings.filter(x=>x.under===i).length,dg=K.dangling.filter(d=>d.over===i).length;
+  return `<div class="step ${hi.has(i)?'seed':''}" onclick="showDoc(${i})">${esc(leaf(K.labels[i]))} <small>${out?'→'+out:''} ${inn?'←'+inn:''} ${dg?'<span style="color:var(--dang)">✕'+dg+'</span>':''}</small></div>`;}).join('')+'</div>';
+ s.appendChild(el('text',{x:500,y:350,'text-anchor':'middle','font-size':14,fill:'var(--mute)'},'document view: sections in reading order in the panel →'));}
+// ── simple (gitdiagram-style): docs as boxes, cross-document references as arrows ──
+function drawSimple(s,K){const names=Object.keys(K.docs),cols=Math.ceil(Math.sqrt(names.length)),box={};
+ names.forEach((d,k)=>{const x=80+(k%cols)*(840/cols),y=80+Math.floor(k/cols)*150,w=840/cols-30,h=90;box[d]=[x+w/2,y+h/2];
+  const dg=K.dangling.filter(z=>docOf[z.over]===d).length; s.appendChild(el('rect',{x,y,width:w,height:h,rx:8,fill:'var(--pan)',stroke:'var(--line)'}));
+  s.appendChild(el('text',{x:x+10,y:y+24,'font-size':12},d.slice(0,Math.floor(w/7)))); s.appendChild(el('text',{x:x+10,y:y+46,'font-size':11,fill:'var(--mute)'},`${K.docs[d].length} sections`));
+  if(dg)s.appendChild(el('text',{x:x+10,y:y+68,'font-size':11,fill:'var(--dang)'},`${dg} dangling refs`));});
+ const cnt={}; for(const x of K.crossings){const a=docOf[x.over],b=docOf[x.under]; if(a&&b&&a!==b)cnt[a+'|'+b]=(cnt[a+'|'+b]||0)+1;}
+ for(const [k,n] of Object.entries(cnt)){const [a,b]=k.split('|'),[x1,y1]=box[a],[x2,y2]=box[b]; const p=el('line',{x1,y1,x2,y2,stroke:'var(--doc)','stroke-width':Math.min(6,1+n/3),opacity:.7}); p.appendChild(el('title',{},`${a} → ${b}: ${n} references`)); s.appendChild(p);}}
+// ── search → hits → construct plan lights the path ──
+document.getElementById('q').onkeydown=async e=>{if(e.key!=='Enter')return; const q=e.target.value.trim(); if(!q)return;
+ const r=await (await fetch('/search?construct=1&k=6&q='+encodeURIComponent(q))).json();
+ panel.innerHTML=`<h3>${r.hits.length} hits · ${r.mode}</h3>`+r.hits.map((h,k)=>`<div class="hit" data-k="${k}"><b>${esc(leaf(h.label))}</b><br><small style="color:var(--mute)">${h.doc} · arc ${h.pos}/${h.n}</small></div>`).join('')+'<div id="plan"></div>';
+ const show=k=>{const h=r.hits[k]; hi=new Set(h.construct.map(c=>c.idx)); doc=h.doc; document.getElementById('docsel').value=doc; render();
+  document.getElementById('plan').innerHTML=`<h3>construct — reading order from "${esc(leaf(h.label))}"</h3>`+h.construct.map(c=>{const cls=c.via==='seed'?'seed':c.via.startsWith('linked')?'link':/^(ref|cited)/.test(c.via)?'x':'ring';
+   return `<div class="step ${cls}" onclick="showDoc(${c.idx})"><small>${esc(c.via)} · ${c.doc}</small><br>${esc(leaf(c.label))}</div>`;}).join('');};
+ [...panel.querySelectorAll('.hit')].forEach(d=>d.onclick=()=>show(+d.dataset.k)); if(r.hits.length)show(0);};
+document.getElementById('an').onchange=async e=>{if(!e.target.checked){AN=null;render();return;}
+ const a=await (await fetch('/analyze')).json(); AN={hub:new Set(a.hubs.slice(0,6).map(h=>h.idx)),fan:new Set(a.fanout.slice(0,6).map(h=>h.idx)),cyc:new Set(a.cycles.flatMap(c=>c.arcs))}; render();
+ panel.innerHTML=`<h3>analysis · ${a.totals.crossings} crossings · ${a.totals.cycles} cycles · ${a.totals.dangling} dangling</h3>`
+  +`<h3 style="color:var(--dang)">hubs — what everything depends on</h3>`+a.hubs.slice(0,8).map(h=>`<div class="step" onclick="showDoc(${h.idx})">${esc(h.label)} <small>← ${h.in} · ${h.doc}</small></div>`).join('')
+  +`<h3 style="color:var(--term)">fan-out — branchy requirements</h3>`+a.fanout.slice(0,8).map(h=>`<div class="step" onclick="showDoc(${h.idx})">${esc(h.label)} <small>→ ${h.out} · ${h.doc}</small></div>`).join('')
+  +`<h3 style="color:var(--doc)">cycles — contention</h3>`+(a.cycles.length?a.cycles.slice(0,6).map(c=>`<div class="step link">${c.labels.map(esc).join(' ⇄ ')} <small>${c.doc}</small></div>`).join(''):'<div style="color:var(--mute)">none</div>')
+  +`<h3 style="color:var(--dang)">dangling — references to nothing</h3>`+Object.entries(a.dangling_by_doc).map(([d,l])=>`<div class="step"><small>${d}</small><br>${l.slice(0,8).map(esc).join(', ')}${l.length>8?' …':''}</div>`).join('');};
+loadK();
+</script></body></html>

@@ -1,0 +1,13 @@
+{
+  "name": "gauss-rag",
+  "version": "0.1.0",
+  "description": "Documents as knots: knot-native RAG with a construct (reading-order) plan, cross-document linking, and interactive knot visualizations. Drop docs in Gauss/, run app.py. BM25 by default, zero API calls.",
+  "author": {
+    "name": "Pedro Paulino (Sir Eggs Erroneous)",
+    "url": "https://github.com/sireggserroneous"
+  },
+  "homepage": "https://github.com/sireggserroneous/gauss-rag",
+  "repository": "https://github.com/sireggserroneous/gauss-rag",
+  "license": "MIT",
+  "keywords": ["rag", "knot-theory", "gauss-code", "retrieval", "visualization", "weaviate"]
+}
