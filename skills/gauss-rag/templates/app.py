@@ -47,22 +47,31 @@ def search(q, k=8, construct=False):
     for h in hits:
         i = h["idx"]; c = chunks[i]
         arcs = kn["docs"].get(c["doc"], [])
-        row = {"idx": i, "score": h.get("score"), "label": c["label"], "doc": os.path.basename(c["doc"]),
+        row = {"idx": i, "score": h.get("score"), "label": c["label"], "doc": rel(c["doc"]),
                "pos": c["pos"], "n": len(arcs), "text": c["text"][:600],
                "crossings": knot.describe(kn, i, chunks)}
         if construct:
             row["construct"] = [{"idx": p["idx"], "pos": p["pos"], "via": p["via"], "label": p["label"],
-                                 "doc": os.path.basename(chunks[p["idx"]]["doc"]), "text": chunks[p["idx"]]["text"]}
+                                 "doc": rel(chunks[p["idx"]]["doc"]), "text": chunks[p["idx"]]["text"]}
                                 for p in knot.construct(i, kn, chunks)]
         out.append(row)
     return {"q": q, "mode": "hybrid" if v else "bm25", "hits": out}
 
 
+def rel(d):
+    """doc path relative to Gauss/docs so the UI can group by folder (Ref/, Lectures/, eli5/)."""
+    root = os.path.join(HERE, "docs")
+    try:
+        return os.path.relpath(d, root) if os.path.isabs(d) else d
+    except ValueError:
+        return os.path.basename(d)
+
+
 def knot_json():
     kn, chunks = S["kn"], S["chunks"]
-    return {"docs": {os.path.basename(d): a for d, a in kn["docs"].items()},
+    return {"docs": {rel(d): a for d, a in kn["docs"].items()},
             "labels": [c["label"] for c in chunks], "crossings": kn["crossings"], "dangling": kn["dangling"],
-            "gauss": {os.path.basename(d): knot.gauss(kn, d) for d in kn["docs"]}}
+            "gauss": {rel(d): knot.gauss(kn, d) for d in kn["docs"]}}
 
 
 class H(BaseHTTPRequestHandler):
@@ -83,7 +92,7 @@ class H(BaseHTTPRequestHandler):
                                   (q.get("construct") or ["0"])[0] not in ("0", "false")))
             elif p == "/doc":
                 i = int((q.get("idx") or ["0"])[0]); c = S["chunks"][i]
-                self._send({"idx": i, "label": c["label"], "doc": os.path.basename(c["doc"]), "pos": c["pos"], "text": c["text"]})
+                self._send({"idx": i, "label": c["label"], "doc": rel(c["doc"]), "pos": c["pos"], "text": c["text"]})
             elif p == "/analyze":
                 self._send(analyze.analyze(S["kn"], S["chunks"]))
             elif p == "/reingest":
